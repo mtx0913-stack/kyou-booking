@@ -244,7 +244,13 @@ img { display: block; }
 .trow.h { background: var(--oat-soft); color: var(--muted); font-size: 13px; border-top: none; }
 .mark-row { grid-template-columns: 160px 120px 150px 130px minmax(0, 1fr) 220px; }
 .hist-row { grid-template-columns: 160px 140px 160px 130px minmax(0, 1fr) 160px; }
-.cust-row { grid-template-columns: minmax(0, 1fr) 140px 90px 90px 100px 120px 130px; }
+.cust-row { grid-template-columns: minmax(0, 1fr) 130px 56px 56px 80px 84px 110px 120px; }
+.note { display: block; margin-top: 4px; padding: 0; border: 0; background: none; font: inherit; font-size: 12px; color: var(--ink-2, #6E5B4A); text-align: left; cursor: pointer; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
+.note.add { color: var(--muted); opacity: .7; }
+.note:hover { text-decoration: underline; }
+.note-edit { margin-top: 6px; }
+.note-edit textarea { width: 100%; min-height: 56px; padding: 8px 10px; font-size: 13px; resize: vertical; height: auto; }
+.note-btns { display: flex; gap: 6px; margin-top: 6px; }
 .who-cell { display: flex; align-items: center; gap: 10px; min-width: 0; }
 
 .banner { display: flex; align-items: center; flex-wrap: wrap; gap: 12px 16px; padding: 18px 22px; border-radius: var(--radius); background: var(--warn-bg); border: 1px solid var(--warn-line); }
