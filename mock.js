@@ -16,6 +16,9 @@
       { id: 'lower', name: '下睫毛＋增黑', price: 499, minutes: 60, note: '下睫毛管理及深層保養', priceText: '$499' },
       { id: 'both', name: '上＋下睫毛', price: 1298, minutes: 180, note: '上下一起做', priceText: '$799＋$499' }
     ],
+    addons: [
+      { id: 'remove', name: '嫁接卸除', price: 400, minutes: 10, note: '卸除原本的嫁接睫毛' }
+    ],
     products: [
       { id: 'b5', name: 'B5 睫毛修護液（強韌液）', price: 680, pairPrice: 1300, note: '一瓶 $680・兩瓶 $1,300' },
       { id: 'peptide', name: '睫毛多肽纖長液', price: 1200, pairPrice: 2300, note: '一瓶 $1,200・兩瓶 $2,300' },
@@ -51,6 +54,8 @@
   bk('Uivy', 'both', firstOpen, '13:00', P.pending);
   bk('Udemo', 'upper', db.slots[6].date, '10:00', P.pending, { b5: 1 });
   bk('Uamber', 'lower', db.slots[3].date, '10:00', P.confirmed);
+  db.bookings[db.bookings.length - 1].reminded = today + ' 10:00';
+  db.bookings[db.bookings.length - 1].attended = today + ' 12:30';
   bk('Ukiki', 'upper', addDays(today, -1), '16:00', P.confirmed);
   bk('Uamber', 'lower', addDays(today, -3), '10:00', P.completed);
   [35, 63, 91, 119, 147].forEach(function (n) { bk('Udemo', 'upper', addDays(today, -n), '10:00', P.completed); });
@@ -92,7 +97,15 @@
         return clone({
           ok: true, user: { name: user.name, picture: user.picture }, blocked: blocked, lineOaId: '@052grnjm',
           customer: cust ? { nickname: cust.nickname, phone: cust.phone } : null,
-          completedCount: stats(user.id).completed, services: db.services, products: db.products,
+          completedCount: stats(user.id).completed, services: db.services, addons: db.addons, products: db.products,
+          cal: (function () {
+            var slots = {}, busy = {};
+            db.slots.forEach(function (s) { if (s.date >= today) (slots[s.date] = slots[s.date] || []).push(s.time); });
+            db.bookings.forEach(function (b) {
+              if ((b.status === P.pending || b.status === P.confirmed) && slots[b.date]) (busy[b.date] = busy[b.date] || []).push([K.toMs(b.date, b.start), K.toMs(b.date, b.end)]);
+            });
+            return { slots: slots, busy: busy, earliest: Date.now() + 2 * 3600000 };
+          })(),
           upcoming: mine.filter(function (b) { return (b.status === P.pending || b.status === P.confirmed) && K.toMs(b.date, b.end) > Date.now(); }),
           history: mine.filter(function (b) { return b.status === P.completed; }).sort(function (a, b) { return b.date.localeCompare(a.date); })
         });
@@ -106,15 +119,24 @@
       }
       case 'book': {
         var svc2 = db.services.filter(function (s) { return s.id === d.serviceId; })[0];
-        if (avail(d.date, svc2.minutes).indexOf(d.time) < 0) err('slot_taken');
+        var ad = db.addons.filter(function (a) { return (d.addons || []).indexOf(a.id) >= 0; });
+        var mins = svc2.minutes + ad.reduce(function (t, a) { return t + a.minutes; }, 0);
+        if (avail(d.date, mins).indexOf(d.time) < 0) err('slot_taken');
         var phone = String(d.phone || '').replace(/\D/g, '');
         if (!/^0\d{8,9}$/.test(phone)) err('bad_phone');
         cust.nickname = d.nickname; cust.phone = phone;
         var pp = K.priceProducts(db.products, d.products || {});
         var b = { id: 'D' + (seq++), created: today, uid: user.id, lineName: user.name, picture: '', nickname: d.nickname, phone: phone,
-          serviceName: svc2.name, date: d.date, start: d.time, end: addMin(d.time, svc2.minutes), productsText: pp.text, total: svc2.price + pp.total, status: P.pending };
+          serviceName: svc2.name + ad.map(function (a) { return '＋' + a.name; }).join(''), date: d.date, start: d.time, end: addMin(d.time, mins), productsText: pp.text,
+          total: svc2.price + ad.reduce(function (t, a) { return t + a.price; }, 0) + pp.total, status: P.pending };
         db.bookings.push(b);
         return { ok: true, booking: clone(b) };
+      }
+      case 'attend': {
+        var ab = db.bookings.filter(function (b) { return b.id === d.id && b.uid === user.id && b.status === P.confirmed; })[0];
+        if (!ab) err('attend_closed');
+        ab.attended = true;
+        return { ok: true, booking: clone(ab) };
       }
       case 'admin.whoami': return { ok: true, userId: user.id, name: user.name, isAdmin: true };
       case 'admin.month': {

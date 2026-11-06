@@ -133,6 +133,11 @@ img { display: block; }
 .legend span { display: flex; align-items: center; gap: 6px; }
 .legend i { width: 6px; height: 6px; border-radius: 50%; }
 
+.ask { display: flex; flex-wrap: wrap; align-items: center; gap: 0 4px; font-size: 13px; color: var(--muted); }
+.linkbtn { border: none; background: none; padding: 0; min-height: 44px; color: var(--brand); font-size: 13px; font-weight: 700; text-decoration: underline; text-underline-offset: 3px; }
+.tsel { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.tsel select { height: 42px; padding: 0 10px; border-radius: 10px; border: 1px solid var(--line-strong); background: #fff; font-size: 15px; font-family: inherit; color: var(--text); }
+.sync { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
 .times { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
 .time { height: 48px; border-radius: 12px; border: 1px solid var(--line-strong); background: #fff; font-size: 16px; font-weight: 700; }
 .time.sel { background: var(--brand); border-color: var(--brand); color: #fff; }

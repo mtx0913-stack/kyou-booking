@@ -11,7 +11,8 @@
     month: today.slice(0, 7), monthData: null, monthLoading: false,
     sel: null, selTimes: [], extraMode: false, extras: [], sameWeekday: false, saving: false,
     bookings: null, autoHours: 24, sheetUrl: '', bTab: ST.pending,
-    customers: null, cFilter: 'all', q: ''
+    customers: null, cFilter: 'all', q: '',
+    months: {}, customH: '10', customM: '00', syncedAt: 0
   };
 
   /* ---------- 啟動 ---------- */
@@ -24,6 +25,7 @@
       A.screen = 'main';
       render();
       await Promise.all([loadMonth(), loadBookings()]);
+      startAutoRefresh();
     } catch (e) {
       A.screen = 'fatal';
       A.error = K.errText(e);
@@ -31,18 +33,46 @@
     }
   }
 
-  async function loadMonth() {
-    A.monthLoading = true; render();
-    try { A.monthData = await K.call('admin.month', { month: A.month }); }
-    catch (e) { K.toast(K.errText(e)); }
+  async function loadMonth(silent) {
+    var month = A.month;
+    if (A.months[month]) A.monthData = A.months[month];
+    else { A.monthData = null; A.monthLoading = true; }
+    render();
+    try {
+      var data = await K.call('admin.month', { month: month });
+      A.months[month] = data;
+      if (A.month === month) A.monthData = data;
+      A.syncedAt = Date.now();
+    } catch (e) { if (!silent) K.toast(K.errText(e)); }
     A.monthLoading = false; render();
   }
-  async function loadBookings() {
+  async function loadBookings(silent) {
     try {
       var r = await K.call('admin.bookings');
+      var before = A.bookings ? pendingCount() : null;
       A.bookings = r.bookings; A.autoHours = r.autoCompleteHours || 24; A.sheetUrl = r.sheetUrl || '';
-    } catch (e) { K.toast(K.errText(e)); }
+      A.syncedAt = Date.now();
+      if (silent && before !== null && pendingCount() > before) K.toast('有新的預約申請');
+    } catch (e) { if (!silent) K.toast(K.errText(e)); }
     render();
+  }
+
+  /** 每 30 秒、以及切回這個頁面時，自動抓最新資料 */
+  var refreshing = false;
+  async function refreshAll() {
+    if (refreshing || A.screen !== 'main' || A.saving) return;
+    var ae = document.activeElement;
+    if (ae && ae.tagName === 'SELECT') return;
+    refreshing = true;
+    try {
+      await Promise.all([loadBookings(true), A.tab === 'slots' ? loadMonth(true) : null, A.tab === 'customers' ? loadCustomers() : null]);
+    } finally { refreshing = false; }
+  }
+  function startAutoRefresh() {
+    setInterval(function () { if (document.visibilityState === 'visible') refreshAll(); }, 30000);
+    document.addEventListener('visibilitychange', function () {
+      if (document.visibilityState === 'visible' && Date.now() - A.syncedAt > 10000) refreshAll();
+    });
   }
   async function loadCustomers() {
     try { A.customers = (await K.call('admin.customers')).customers; }
@@ -71,6 +101,11 @@
     }
     return out;
   }
+  function optList(from, to, step, sel) {
+    var out = '';
+    for (var i = from; i <= to; i += step) { var v = K.pad(i); out += '<option' + (v === sel ? ' selected' : '') + '>' + v + '</option>'; }
+    return out;
+  }
   function fmtPhone(p) { p = String(p || ''); return p.length === 10 ? p.slice(0, 4) + ' ' + p.slice(4, 7) + ' ' + p.slice(7) : p; }
   function remainText(b) {
     var left = K.toMs(b.date, b.end) + A.autoHours * 3600000 - K.nowMs();
@@ -94,6 +129,8 @@
     return '<header class="anav"><div class="brand">' + K.LOGO + '<b>預約後台</b></div>' +
       '<nav aria-label="後台功能">' + tab('slots', '開放時段') + tab('bookings', '預約管理', n ? '<span class="n">' + n + '</span>' : '') + tab('customers', '顧客名單') + '</nav>' +
       '<div class="spacer"></div><div class="tools">' +
+      (A.syncedAt ? '<span class="sync">' + new Date(A.syncedAt + 8 * 3600000).toISOString().slice(11, 16) + ' 已更新</span>' : '') +
+      '<button type="button" class="btn btn-line btn-sm" data-act="refresh">重新整理</button>' +
       (A.sheetUrl ? '<a class="btn btn-line btn-sm" href="' + esc(A.sheetUrl) + '" target="_blank" rel="noopener">開啟 Google 試算表</a>' : '') + '</div></header>';
   }
 
@@ -151,9 +188,10 @@
     return '<aside class="card slots-edit"><div><div class="small muted">編輯開放時段</div><div class="bold" style="font-size:22px">' + K.md(A.sel) + '</div></div>' +
       '<div class="small muted">勾選這天客人可以「開始」的時間</div>' +
       '<div class="tgrid">' + grid + '</div>' +
-      '<div style="display:flex;gap:8px;align-items:center"><label class="sr-only" for="customTime">其他時間</label>' +
-      '<input id="customTime" class="input" type="time" step="900" style="height:42px;flex:1">' +
-      '<button type="button" class="btn btn-line btn-sm" data-act="addTime">加入其他時間</button></div>' +
+      '<div class="tsel"><span class="small muted">其他時間</span>' +
+      '<label class="sr-only" for="customH">時</label><select id="customH">' + optList(7, 22, 1, A.customH) + '</select><span>:</span>' +
+      '<label class="sr-only" for="customM">分</label><select id="customM">' + ['00', '15', '30', '45'].map(function (m) { return '<option' + (m === A.customM ? ' selected' : '') + '>' + m + '</option>'; }).join('') + '</select>' +
+      '<button type="button" class="btn btn-line btn-sm" data-act="addTime">加入</button></div>' +
       (bk ? '<div class="soft" style="display:flex;flex-direction:column;gap:8px">' + bk + '</div>' : '') +
       '<div><div class="bold small">也套用到</div>' +
       '<label class="check"><input type="checkbox" id="sameWd"' + (A.sameWeekday ? ' checked' : '') + '>這個月之後每個星期' + wd + '</label>' +
@@ -176,7 +214,7 @@
       var label = s + (s === ST.pending && counts[s] ? ' ' + counts[s] : '');
       return '<button type="button" class="pill' + (A.bTab === s ? ' on' : '') + '" data-act="bTab" data-s="' + s + '" aria-pressed="' + (A.bTab === s) + '">' + label + '</button>';
     }).join('');
-    var head = '<div class="pills">' + pills + '<div style="flex:1"></div><div class="small muted">在 LINE 回覆客人後，再按「確認預約」</div></div>';
+    var head = '<div class="pills">' + pills + '<div style="flex:1"></div><div class="small muted">按「確認預約」會自動傳「預約成功」通知給客人</div></div>';
 
     var mark = '';
     if (toMark.length) {
@@ -222,6 +260,10 @@
       '<div class="k">加購</div><div class="' + (b.productsText ? '' : 'muted') + '">' + (esc(b.productsText) || '無') + '</div>' +
       '<div class="k">電話</div><div><a href="tel:' + esc(b.phone) + '">' + fmtPhone(b.phone) + '</a></div>' +
       '<div class="k">合計</div><div class="bold">' + K.money(b.total) + '（到店付款）</div></div>' +
+      (b.status === ST.confirmed && (b.reminded || b.attended)
+        ? '<div class="actions">' + (b.reminded ? '<span class="badge badge-done">已傳提醒</span>' : '') +
+          (b.attended ? '<span class="badge badge-confirmed">客人已確認出席</span>' : '') + '</div>'
+        : '') +
       '<div class="tiny muted">' + esc(b.created) + ' 送出</div>' +
       '<div class="actions"><button type="button" class="btn btn-sm btn-line" data-act="copy" data-id="' + esc(b.id) + '">複製預約資訊</button><div class="sp"></div>' + act + '</div></article>';
   }
@@ -292,12 +334,12 @@
     if (act === 'tab') {
       A.tab = el.getAttribute('data-tab');
       render();
-      if (A.tab === 'bookings') loadBookings();
+      if (A.tab === 'bookings') loadBookings(true);
       if (A.tab === 'customers') loadCustomers();
-      if (A.tab === 'slots') loadMonth();
+      if (A.tab === 'slots') loadMonth(true);
     } else if (act === 'month') {
       A.month = K.shiftMonth(A.month, +el.getAttribute('data-n'));
-      A.monthData = null; A.sel = null; A.extras = []; A.extraMode = false; A.sameWeekday = false;
+      A.sel = null; A.extras = []; A.extraMode = false; A.sameWeekday = false;
       loadMonth();
     } else if (act === 'day') {
       var date = el.getAttribute('data-date');
@@ -317,10 +359,11 @@
       if (j >= 0) A.selTimes.splice(j, 1); else A.selTimes.push(t);
       render();
     } else if (act === 'addTime') {
-      var v = (document.getElementById('customTime') || {}).value;
-      if (!/^\d{2}:\d{2}$/.test(v || '')) { K.toast('請先選一個時間'); return; }
+      var v = A.customH + ':' + A.customM;
       if (A.selTimes.indexOf(v) < 0) A.selTimes.push(v);
       render();
+    } else if (act === 'refresh') {
+      refreshAll();
     } else if (act === 'saveDay' || act === 'closeDay') {
       saveDays(act === 'closeDay');
     } else if (act === 'copyPrev') {
@@ -361,6 +404,8 @@
   });
 
   root.addEventListener('change', function (e) {
+    if (e.target.id === 'customH') { A.customH = e.target.value; return; }
+    if (e.target.id === 'customM') { A.customM = e.target.value; return; }
     if (e.target.id === 'sameWd') { A.sameWeekday = e.target.checked; render(); }
     if (e.target.id === 'extraMode') { A.extraMode = e.target.checked; if (!A.extraMode) A.extras = []; render(); }
   });
@@ -374,24 +419,38 @@
     var dates = [A.sel];
     if (A.sameWeekday) sameWeekdayDates(A.sel).forEach(function (d) { if (dates.indexOf(d) < 0) dates.push(d); });
     A.extras.forEach(function (d) { if (dates.indexOf(d) < 0) dates.push(d); });
+    var md = A.monthData || { slots: {}, bookings: [] };
+    var prevSlots = JSON.parse(JSON.stringify(md.slots));
+    dates.forEach(function (d) { if (times.length) md.slots[d] = times.slice().sort(); else delete md.slots[d]; });
+    A.monthData = md; A.months[A.month] = md;
+    A.extras = []; A.extraMode = false; A.sameWeekday = false;
+    A.selTimes = times.slice();
     A.saving = true; render();
     try {
       await K.call('admin.saveDays', { dates: dates, times: times });
       K.toast(close && locked.length ? '已關閉，已有預約的時段會保留' : '已儲存 ' + dates.length + ' 天');
-      A.extras = []; A.extraMode = false; A.sameWeekday = false;
-      A.selTimes = times.slice();
-      await loadMonth();
-    } catch (err) { K.toast(K.errText(err)); }
+    } catch (err) {
+      md.slots = prevSlots;
+      K.toast('沒有存到：' + K.errText(err));
+    }
     A.saving = false; render();
   }
 
   async function setStatus(id, s) {
+    var b = (A.bookings || []).filter(function (x) { return x.id === id; })[0];
+    var prev = b && b.status;
+    if (b) { b.status = s; render(); }
     try {
-      await K.call('admin.setStatus', { id: id, status: s });
-      K.toast('已改成「' + s + '」');
-      await loadBookings();
-      if (A.monthData) loadMonth();
-    } catch (err) { K.toast(K.errText(err)); }
+      var r = await K.call('admin.setStatus', { id: id, status: s });
+      if (s === ST.confirmed && r.pushed) K.toast('已確認，並傳了「預約成功」通知給客人');
+      else if (s === ST.confirmed && r.canPush) K.toast('已確認，但通知沒傳出去（客人可能還沒加好友），請到 LINE 回覆她');
+      else K.toast('已改成「' + s + '」');
+      loadBookings(true);
+      if (A.monthData) loadMonth(true);
+    } catch (err) {
+      if (b) { b.status = prev; render(); }
+      K.toast(K.errText(err));
+    }
   }
 
   function copy(text, okMsg) {

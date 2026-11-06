@@ -5,7 +5,7 @@
   var thisMonth = K.todayTW().slice(0, 7);
 
   var S = {
-    screen: 'loading', data: null, serviceId: null, month: thisMonth, avail: {}, availLoading: false,
+    screen: 'loading', data: null, serviceId: null, addons: {}, month: thisMonth,
     date: null, time: null, qty: {}, nickname: '', same: true, phone: '', error: '', booking: null,
     showAllHist: false, busy: false, from: 'service'
   };
@@ -21,15 +21,57 @@
   async function boot() {
     try {
       await K.start();
+      var attendId = new URLSearchParams(location.search).get('attend');
+      if (attendId) {
+        try {
+          var a = await K.call('attend', { id: attendId });
+          S.attendBooking = a.booking;
+          await loadInit();
+          set({ screen: 'attended' });
+        } catch (err) {
+          await loadInit();
+          set({ screen: S.data.blocked ? 'blocked' : 'mine', from: 'service' });
+          K.toast(err.code === 'attend_closed' || err.code === 'not_found' ? '這筆預約已無法確認出席，有問題請直接傳 LINE 給我們' : K.errText(err));
+        }
+        return;
+      }
+      var cached = readCache();
+      if (cached) {
+        applyInit(cached);
+        set({ screen: S.data.blocked ? 'blocked' : 'service' });
+      }
       await loadInit();
-      set({ screen: S.data.blocked ? 'blocked' : 'service' });
+      if (S.screen === 'loading' || S.screen === 'service' || S.screen === 'blocked') {
+        set({ screen: S.data.blocked ? 'blocked' : 'service' }, true);
+      } else {
+        render();
+      }
     } catch (e) {
+      if (S.data) { K.toast(K.errText(e)); return; }
       set({ screen: 'fatal', error: K.errText(e) });
     }
   }
 
+  var CACHE_KEY = 'kyou_init_v2';
+  function readCache() {
+    if (K.isDemo()) return null;
+    try {
+      var c = JSON.parse(localStorage.getItem(CACHE_KEY) || 'null');
+      return c && c.at > Date.now() - 7 * 86400000 ? c.d : null;
+    } catch (e) { return null; }
+  }
+  function writeCache(d) {
+    if (K.isDemo()) return;
+    try { localStorage.setItem(CACHE_KEY, JSON.stringify({ at: Date.now(), d: d })); } catch (e) {}
+  }
+
   async function loadInit() {
     var d = await K.call('init');
+    applyInit(d);
+    writeCache(d);
+  }
+
+  function applyInit(d) {
     S.data = d;
     var c = d.customer;
     if (!S.phone && c) S.phone = c.phone || '';
@@ -40,21 +82,35 @@
   }
 
   function svc() { return (S.data.services || []).filter(function (s) { return s.id === S.serviceId; })[0]; }
-  function hours(min) { var h = min / 60; return (Math.round(h * 10) / 10) + ' 小時'; }
+  function hours(min) {
+    var h = Math.floor(min / 60), m = min % 60;
+    return (h ? h + ' 小時' : '') + (h && m ? ' ' : '') + (m ? m + ' 分鐘' : '');
+  }
 
-  async function loadAvail() {
-    var key = S.serviceId + '|' + S.month;
-    if (S.avail[key]) return;
-    S.availLoading = true;
-    render();
-    try {
-      var r = await K.call('availability', { serviceId: S.serviceId, month: S.month });
-      S.avail[key] = r.days || {};
-    } catch (e) {
-      K.toast(K.errText(e));
-    }
-    S.availLoading = false;
-    render();
+  function addonList() {
+    return (S.data.addons || []).filter(function (a) { return S.addons[a.id]; });
+  }
+  function totalMinutes() {
+    return svc().minutes + addonList().reduce(function (t, a) { return t + a.minutes; }, 0);
+  }
+
+  /** 用 init 帶回來的開放時段與已佔用時間，直接在手機上算出可選時段（不用再等網路） */
+  function daysForMonth(month) {
+    var cal = S.data.cal || { slots: {}, busy: {}, earliest: 0 };
+    var minutes = totalMinutes();
+    var earliest = Math.max(cal.earliest || 0, Date.now());
+    var out = {};
+    Object.keys(cal.slots).forEach(function (date) {
+      if (date.indexOf(month) !== 0) return;
+      var busy = cal.busy[date] || [];
+      out[date] = cal.slots[date].filter(function (t, i, arr) {
+        if (arr.indexOf(t) !== i) return false;
+        var s = K.toMs(date, t), e = s + minutes * 60000;
+        if (s < earliest) return false;
+        return !busy.some(function (r) { return s < r[1] && r[0] < e; });
+      });
+    });
+    return out;
   }
 
   /* ---------- 共用片段 ---------- */
@@ -111,14 +167,13 @@
         '<div class="card hello">' + K.avatar(d.user.name, d.user.picture) +
         '<div class="who"><b>嗨，' + esc(d.user.name) + '</b><div class="small muted">' + hello + '</div></div>' +
         '<a href="#" data-act="go" data-to="mine">我的預約 ›</a></div>' + up +
-        step(1, '想做什麼項目？') + '<div class="choices" role="radiogroup" aria-label="服務項目">' + list + '</div></main>' +
+        step(1, '想做什麼項目？') + '<div class="choices" role="radiogroup" aria-label="服務項目">' + list + '</div>' + addonsHtml() + '</main>' +
         footer('<button type="button" class="btn" data-act="go" data-to="datetime"' + (S.serviceId ? '' : ' disabled') + '>下一步：選時間</button>');
     },
 
     datetime: function () {
       var s = svc();
-      var key = S.serviceId + '|' + S.month;
-      var days = S.avail[key];
+      var days = daysForMonth(S.month);
       var today = K.todayTW();
       var first = S.month + '-01';
       var offset = K.weekday(first);
@@ -141,7 +196,7 @@
         '<b>' + K.monthTitle(S.month) + '</b>' +
         '<button type="button" class="icon-btn" data-act="month" data-n="1" aria-label="下個月"' + (canNext ? '' : ' disabled') + '>' + K.ICON.next + '</button></div>' +
         '<div class="cal-week" aria-hidden="true">' + K.WD.map(function (w) { return '<div>' + w + '</div>'; }).join('') + '</div>' +
-        (S.availLoading && !days ? '<div class="loading" style="padding:30px 0"><div class="spinner"></div></div>' : '<div class="cal-grid">' + cells + '</div>') +
+        '<div class="cal-grid">' + cells + '</div>' +
         '<div class="legend"><span><i style="background:#A8805E"></i>有空檔</span><span><i style="background:#D9C7B0"></i>灰色＝已額滿或未開放</span></div></div>';
 
       var timesHtml = '';
@@ -151,13 +206,15 @@
           (list.length
             ? '<div class="times">' + list.map(function (t) {
                 return '<button type="button" class="time' + (S.time === t ? ' sel' : '') + '" data-act="time" data-time="' + t + '" aria-pressed="' + (S.time === t) + '">' + t + '</button>';
-              }).join('') + '</div><div class="tiny muted">已被預約、或接在後面做不完的時段不會顯示</div>'
+              }).join('') + '</div>'
             : '<div class="small muted">這天已經額滿，請選其他日期</div>') + '</div>';
       } else if (days && !Object.keys(days).some(function (k) { return k >= today && days[k].length; })) {
         timesHtml = '<div class="small muted">這個月目前沒有空檔，可以看看下個月</div>';
       }
+      var askLine = '<div class="ask">沒有喜歡的時段嗎？<button type="button" class="linkbtn" data-act="chat">私訊官方 LINE 詢問看看 ›</button></div>';
+      var chipText = s.name + addonList().map(function (a) { return '＋' + a.name; }).join('') + '・約 ' + hours(totalMinutes());
       return barBack('日子 kyou 預約', 'service') + '<main class="main">' + step(2, '選擇日期與時段') +
-        '<div class="chip">' + esc(s.name) + '・約 ' + hours(s.minutes) + '</div>' + cal + timesHtml + '</main>' +
+        '<div class="chip">' + esc(chipText) + '</div>' + cal + timesHtml + askLine + '</main>' +
         footer('<button type="button" class="btn" data-act="go" data-to="products"' + (S.time ? '' : ' disabled') + '>下一步</button>');
     },
 
@@ -201,10 +258,11 @@
       return barBack('日子 kyou 預約', 'info') + '<main class="main"><div class="step"><h1>確認預約內容</h1></div>' +
         '<div class="card summary">' +
         r('項目', esc(s.name), s.price) +
-        r('時間', K.md(S.date) + ' ' + S.time + '–' + endTime(S.time, s.minutes)) +
-        (pp.text ? r('加購', esc(pp.text), pp.total) : '') +
+        addonList().map(function (a) { return r('加購', esc(a.name), a.price); }).join('') +
+        r('時間', K.md(S.date) + ' ' + S.time + '–' + endTime(S.time, totalMinutes())) +
+        (pp.text ? r('保養品', esc(pp.text), pp.total) : '') +
         r('稱呼', esc(nick)) + r('電話', esc(fmtPhone(S.phone))) +
-        '<div class="r"><div class="v">合計（到店付款）</div><div>' + K.money(s.price + pp.total) + '</div></div></div>' +
+        '<div class="r"><div class="v">合計（到店付款）</div><div>' + K.money(s.price + addonList().reduce(function (t, a) { return t + a.price; }, 0) + pp.total) + '</div></div></div>' +
         '<div class="soft"><div>・僅接受現金及現場轉帳</div><div>・地址：臺中西區五權路（預約成功後提供詳細地址）</div></div>' +
         rulesNotice() + (S.error ? '<div class="err" role="alert">' + esc(S.error) + '</div>' : '') + '</main>' +
         footer('<button type="button" class="btn" data-act="book"' + (S.busy ? ' disabled' : '') + '>' + (S.busy ? '送出中…' : '送出預約申請') + '</button>');
@@ -226,12 +284,24 @@
         footer('<button type="button" class="btn" data-act="chat">回到 LINE 聊天室</button><button type="button" class="btn btn-ghost" data-act="go" data-to="mine">查看我的預約</button>');
     },
 
+    attended: function () {
+      var b = S.attendBooking;
+      return '<header class="topbar"><div class="title" style="margin:0 auto">日子 kyou 預約</div></header>' +
+        '<main class="main" style="align-items:center;gap:22px;padding-top:40px">' +
+        '<div class="round-icon"><svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#7A5C42" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12l5 5 9-10"/></svg></div>' +
+        '<div class="center"><h1 style="margin:0;font-size:22px">已確認出席</h1><div class="muted" style="font-size:15px">謝謝你，我們到時見！</div></div>' +
+        '<div class="soft" style="width:100%;font-size:14px"><div class="bold">' + K.md(b.date) + ' ' + b.start + '　' + esc(b.serviceName) + '</div>' +
+        '<div class="muted">保留 15 分鐘緩衝時間，逾時視為取消</div></div></main>' +
+        footer('<button type="button" class="btn" data-act="chat">回到 LINE 聊天室</button><button type="button" class="btn btn-ghost" data-act="go" data-to="mine">查看我的預約</button>');
+    },
+
     mine: function () {
       var d = S.data;
       var up = d.upcoming.slice().sort(function (a, b) { return (a.date + a.start).localeCompare(b.date + b.start); }).map(function (b) {
         var cls = b.status === '已確認' ? 'badge-confirmed' : 'badge-pending';
+        var label = b.status === '已確認' && b.attended ? '已確認出席' : b.status;
         return '<div class="card" style="padding:16px;display:flex;flex-direction:column;gap:6px"><div style="display:flex;justify-content:space-between;align-items:center;gap:10px">' +
-          '<b style="font-size:16px">' + K.md(b.date) + ' ' + b.start + '</b><span class="badge ' + cls + '">' + esc(b.status) + '</span></div>' +
+          '<b style="font-size:16px">' + K.md(b.date) + ' ' + b.start + '</b><span class="badge ' + cls + '">' + esc(label) + '</span></div>' +
           '<div class="small muted">' + esc(b.serviceName) + (b.productsText ? '・加購 ' + esc(b.productsText) : '') + '</div></div>';
       }).join('');
       var hist = d.history.slice(0, S.showAllHist ? 999 : 3).map(function (b) {
@@ -248,6 +318,17 @@
         '<button type="button" class="btn btn-line" data-act="go" data-to="service">預約新的時間</button></main>';
     }
   };
+
+  function addonsHtml() {
+    var list = S.data.addons || [];
+    if (!list.length) return '';
+    return '<div class="choices"><div class="bold" style="font-size:15px">加購項目<span class="small muted" style="font-weight:500">（可複選，不需要可略過）</span></div>' +
+      list.map(function (a) {
+        return '<label class="choice"><input type="checkbox" name="addon" value="' + esc(a.id) + '"' + (S.addons[a.id] ? ' checked' : '') + '>' +
+          '<div class="body"><div class="row"><span>' + esc(a.name) + '</span><span>＋' + K.money(a.price) + '</span></div>' +
+          '<div class="small muted">' + esc(a.note) + (a.note ? '・' : '') + '約 ' + a.minutes + ' 分鐘</div></div></label>';
+      }).join('') + '</div>';
+  }
 
   function endTime(t, min) { var x = +t.slice(0, 2) * 60 + +t.slice(3, 5) + min; return K.pad(Math.floor(x / 60)) + ':' + K.pad(x % 60); }
   function fmtPhone(p) { p = String(p).replace(/\D/g, ''); return p.length === 10 ? p.slice(0, 4) + ' ' + p.slice(4, 7) + ' ' + p.slice(7) : p; }
@@ -271,14 +352,17 @@
         S.from = S.screen === 'mine' ? 'service' : S.screen; S.showAllHist = false;
         loadInit().then(function () { if (S.screen === 'mine') render(); }, function () {});
       }
-      if (to === 'datetime' && S.screen === 'service') { set({ screen: 'datetime', error: '' }); loadAvail(); return; }
+      if (to === 'datetime' && S.screen === 'service') {
+        if (S.date && daysForMonth(S.date.slice(0, 7))[S.date] && daysForMonth(S.date.slice(0, 7))[S.date].indexOf(S.time) < 0) S.time = null;
+        set({ screen: 'datetime', error: '' });
+        return;
+      }
       if (to === 'service' && S.screen === 'mine') { S.from = 'service'; }
       set({ screen: to, error: '' });
     } else if (act === 'month') {
       S.month = K.shiftMonth(S.month, +el.getAttribute('data-n'));
       S.date = null; S.time = null;
       render();
-      loadAvail();
     } else if (act === 'date') {
       set({ date: el.getAttribute('data-date'), time: null }, true);
     } else if (act === 'time') {
@@ -312,6 +396,10 @@
     if (t.name === 'svc') {
       if (S.serviceId !== t.value) { S.serviceId = t.value; S.date = null; S.time = null; }
       render();
+    } else if (t.name === 'addon') {
+      S.addons[t.value] = t.checked;
+      S.time = null;
+      render();
     } else if (t.id === 'same') {
       S.same = t.checked;
       if (!S.same && S.nickname === S.data.user.name) S.nickname = '';
@@ -330,22 +418,21 @@
     set({ busy: true, error: '' }, true);
     try {
       var r = await K.call('book', {
-        serviceId: S.serviceId, date: S.date, time: S.time, products: S.qty,
+        serviceId: S.serviceId, addons: addonList().map(function (a) { return a.id; }), date: S.date, time: S.time, products: S.qty,
         nickname: S.same ? S.data.user.name : S.nickname.trim(), phone: S.phone
       });
       S.booking = r.booking;
       S.busy = false;
-      set({ screen: 'submitted', qty: {}, time: null, date: null });
-      S.avail = {};
+      sendApplyCard(r.booking);
+      set({ screen: 'submitted', qty: {}, time: null, date: null, addons: {} });
       loadInit().then(render, function () {});
     } catch (e) {
       S.busy = false;
       var code = e.code;
       if (code === 'slot_taken') {
-        S.avail = {};
         K.toast(K.errText(e));
+        try { await loadInit(); } catch (err) {}
         set({ screen: 'datetime', time: null });
-        loadAvail();
       } else if (code === 'blocked') {
         S.data.blocked = true;
         set({ screen: 'blocked' });
@@ -355,6 +442,52 @@
         set({ error: K.errText(e) }, true);
       }
     }
+  }
+
+  /* 送出後，以客人的名義在聊天室傳一張「預約申請已送出」卡片（免費，不佔官方帳號額度） */
+  function sendApplyCard(b) {
+    try {
+      if (K.isDemo() || typeof liff === 'undefined' || !liff.isInClient()) return;
+      var ctx = liff.getContext && liff.getContext();
+      if (ctx && ctx.type === 'none') return;
+      var wd = K.WD[K.weekday(b.date)];
+      var when = (+b.date.slice(5, 7)) + ' 月 ' + (+b.date.slice(8, 10)) + ' 日（' + wd + '）' + b.start;
+      var rows = [['項目', b.serviceName]];
+      if (b.productsText) rows.push(['加購', b.productsText]);
+      rows.push(['合計', K.money(b.total) + '（到店付款）']);
+      var notes = ['預約申請已送出，還不算預約成功！', '請等待官方 LINE 回覆確認', '收到「預約成功」通知即完成'];
+      var liffUrl = 'https://liff.line.me/' + (window.KYOU_CONFIG || {}).LIFF_ID;
+      var card = {
+        type: 'flex', altText: '預約申請已送出：' + when,
+        contents: {
+          type: 'bubble',
+          body: {
+            type: 'box', layout: 'vertical', paddingAll: '20px', backgroundColor: '#FFFFFF',
+            contents: [
+              { type: 'text', text: '預約申請已送出', weight: 'bold', size: 'xl', color: '#3F352C', align: 'center' },
+              { type: 'text', text: '日子 kyou lash studio', size: 'sm', color: '#6E5B4A', align: 'center', margin: 'sm' },
+              { type: 'box', layout: 'vertical', backgroundColor: '#F1E8DB', cornerRadius: '12px', paddingAll: '12px', margin: 'lg',
+                contents: [{ type: 'text', text: when, weight: 'bold', size: 'lg', color: '#7A5C42', align: 'center', wrap: true }] },
+              { type: 'box', layout: 'vertical', margin: 'lg', spacing: 'sm',
+                contents: rows.map(function (r) {
+                  return { type: 'box', layout: 'horizontal', spacing: 'md', contents: [
+                    { type: 'text', text: r[0], size: 'sm', color: '#6E5B4A', flex: 2 },
+                    { type: 'text', text: r[1], size: 'sm', color: '#3F352C', flex: 6, wrap: true, align: 'end' }] };
+                }) },
+              { type: 'box', layout: 'horizontal', margin: 'xl', spacing: 'md', contents: [
+                { type: 'box', layout: 'vertical', width: '3px', backgroundColor: '#A8805E', contents: [] },
+                { type: 'box', layout: 'vertical', spacing: 'xs',
+                  contents: notes.map(function (t) { return { type: 'text', text: t, size: 'sm', color: '#6E5B4A', wrap: true }; }) }] }
+            ]
+          },
+          footer: {
+            type: 'box', layout: 'vertical', paddingAll: '16px', paddingTop: '0px', backgroundColor: '#FFFFFF',
+            contents: [{ type: 'button', style: 'primary', color: '#7A5C42', height: 'md', action: { type: 'uri', label: '查看預約明細', uri: liffUrl } }]
+          }
+        }
+      };
+      liff.sendMessages([card]).catch(function () {});
+    } catch (e) { /* 傳不出去也不影響預約 */ }
   }
 
   boot();
