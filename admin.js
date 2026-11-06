@@ -62,7 +62,8 @@
   async function refreshAll() {
     if (refreshing || A.screen !== 'main' || A.saving) return;
     var ae = document.activeElement;
-    if (ae && ae.tagName === 'SELECT') return;
+    if (ae && (ae.tagName === 'SELECT' || ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA')) return;
+    if (A.editNote) return;
     refreshing = true;
     try {
       await Promise.all([loadBookings(true), A.tab === 'slots' ? loadMonth(true) : null, A.tab === 'customers' ? loadCustomers() : null]);
@@ -295,15 +296,25 @@
       return true;
     });
     if (!cs.length) return '<div class="card empty">沒有符合的顧客</div>';
-    return '<div class="card table"><div class="trow h cust-row"><div>顧客</div><div>電話</div><div>完成次數</div><div>連續放鳥</div><div>最近一次</div><div>狀態</div><div></div></div>' +
+    return '<div class="card table"><div class="trow h cust-row"><div>顧客</div><div>電話</div><div>完成</div><div>取消</div><div>連續放鳥</div><div>最近一次</div><div>狀態</div><div></div></div>' +
       cs.map(function (c) {
         var status = c.blocked ? '<span class="badge badge-black">黑名單</span>' : c.streak > 0 ? '<span class="badge badge-warn">放鳥 ' + c.streak + ' 次</span>' : '<span class="small muted">正常</span>';
         var act = c.blocked ? '<button type="button" class="btn btn-xs btn-line" data-act="unblock" data-uid="' + esc(c.uid) + '">解除</button>'
           : c.streak >= 2 ? '<button type="button" class="btn btn-xs btn-warn" data-act="block" data-uid="' + esc(c.uid) + '">加入黑名單</button>' : '';
-        return '<div class="trow cust-row"><div class="who-cell">' + K.avatar(c.lineName, c.picture, 'sm') + '<div style="min-width:0"><div class="bold">' + esc(c.nickname || c.lineName) + '</div><div class="tiny muted">LINE：' + esc(c.lineName) + '</div></div></div>' +
-          '<div>' + fmtPhone(c.phone) + '</div><div>' + c.completedCount + '</div><div style="' + (c.streak ? 'color:var(--warn);font-weight:700' : '') + '">' + c.streak + '</div>' +
+        return '<div class="trow cust-row"><div class="who-cell">' + K.avatar(c.lineName, c.picture, 'sm') + '<div style="min-width:0"><div class="bold">' + esc(c.nickname || c.lineName) + '</div><div class="tiny muted">LINE：' + esc(c.lineName) + '</div>' + noteHtml(c) + '</div></div>' +
+          '<div>' + fmtPhone(c.phone) + '</div><div>' + c.completedCount + '</div><div>' + (c.cancelCount || 0) + '</div><div style="' + (c.streak ? 'color:var(--warn);font-weight:700' : '') + '">' + c.streak + '</div>' +
           '<div>' + (c.lastDate ? c.lastDate.slice(5).replace('-', '/') : '—') + '</div><div>' + status + '</div><div>' + act + '</div></div>';
       }).join('') + '</div>';
+  }
+
+  function noteHtml(c) {
+    if (A.editNote === c.uid) {
+      return '<div class="note-edit"><label class="sr-only" for="noteInput">備註</label><textarea id="noteInput" class="input" rows="2" maxlength="500" placeholder="例如：眼睛敏感、喜歡自然款">' + esc(c.note || '') + '</textarea>' +
+        '<div class="note-btns"><button type="button" class="btn btn-xs" data-act="noteSave" data-uid="' + esc(c.uid) + '">儲存</button><button type="button" class="btn btn-xs btn-line" data-act="noteCancel">取消</button></div></div>';
+    }
+    return c.note
+      ? '<button type="button" class="note" data-act="noteEdit" data-uid="' + esc(c.uid) + '" title="編輯備註">📝 ' + esc(c.note) + '</button>'
+      : '<button type="button" class="note add" data-act="noteEdit" data-uid="' + esc(c.uid) + '">＋ 備註</button>';
   }
 
   function render() {
@@ -393,6 +404,19 @@
       if (!confirm(msg)) return;
       try { await K.call('admin.block', { uid: uid, blocked: act === 'block' }); K.toast(act === 'block' ? '已加入黑名單' : '已解除黑名單'); loadCustomers(); }
       catch (err) { K.toast(K.errText(err)); }
+    } else if (act === 'noteEdit') {
+      A.editNote = el.getAttribute('data-uid'); render();
+      var ta = document.getElementById('noteInput'); if (ta) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }
+    } else if (act === 'noteCancel') {
+      A.editNote = null; render();
+    } else if (act === 'noteSave') {
+      var nuid = el.getAttribute('data-uid');
+      var text = (document.getElementById('noteInput') || {}).value || '';
+      var nc = A.customers.filter(function (x) { return x.uid === nuid; })[0];
+      var old = nc.note;
+      nc.note = text.trim(); A.editNote = null; render();
+      try { await K.call('admin.note', { uid: nuid, note: nc.note }); K.toast('備註已儲存'); }
+      catch (err) { nc.note = old; render(); K.toast(K.errText(err)); }
     } else if (act === 'dismiss') {
       try { await K.call('admin.dismiss', { uid: el.getAttribute('data-uid') }); loadCustomers(); }
       catch (err) { K.toast(K.errText(err)); }
