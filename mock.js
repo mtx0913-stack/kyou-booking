@@ -164,12 +164,17 @@
       case 'admin.customers': {
         return { ok: true, customers: clone(db.customers.map(function (c) {
           var st = stats(c.uid);
-          return Object.assign({}, c, { completedCount: st.completed, streak: st.streak, lastDate: st.lastDate, needsPrompt: !c.blocked && st.streak >= 2 && st.streak > c.dismissed });
+          var cc = db.bookings.filter(function (b) { return b.uid === c.uid && b.status === '已取消'; }).length;
+          return Object.assign({}, c, { note: c.note || '', cancelCount: cc, completedCount: st.completed, streak: st.streak, lastDate: st.lastDate, needsPrompt: !c.blocked && st.streak >= 2 && st.streak > c.dismissed });
         }).sort(function (a, b) { return b.lastDate.localeCompare(a.lastDate); })) };
       }
       case 'admin.block': {
         db.customers.filter(function (c) { return c.uid === d.uid; })[0].blocked = !!d.blocked;
         return { ok: true };
+      }
+      case 'admin.note': {
+        db.customers.filter(function (c) { return c.uid === d.uid; })[0].note = String(d.note || '');
+        return { ok: true, note: String(d.note || '') };
       }
       case 'admin.dismiss': {
         var c = db.customers.filter(function (c) { return c.uid === d.uid; })[0];
