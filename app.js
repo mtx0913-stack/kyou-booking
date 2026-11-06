@@ -35,14 +35,16 @@
         }
         return;
       }
+      var first = new URLSearchParams(location.search).get('view') === 'mine' ? 'mine' : 'service';
+      if (first === 'mine') S.from = 'service';
       var cached = readCache();
       if (cached) {
         applyInit(cached);
-        set({ screen: S.data.blocked ? 'blocked' : 'service' });
+        set({ screen: S.data.blocked ? 'blocked' : first });
       }
       await loadInit();
-      if (S.screen === 'loading' || S.screen === 'service' || S.screen === 'blocked') {
-        set({ screen: S.data.blocked ? 'blocked' : 'service' }, true);
+      if (S.screen === 'loading' || S.screen === first || S.screen === 'blocked') {
+        set({ screen: S.data.blocked ? 'blocked' : first }, true);
       } else {
         render();
       }
