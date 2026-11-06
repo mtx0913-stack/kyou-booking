@@ -18,10 +18,19 @@
   }
 
   /* ---------- 啟動 ---------- */
+  /** 讀網址參數；從 LINE 開啟時參數可能還包在 liff.state 裡 */
+  function urlParam(name) {
+    var q = new URLSearchParams(location.search);
+    if (q.get(name)) return q.get(name);
+    var st = q.get('liff.state');
+    if (!st) return null;
+    var i = st.indexOf('?');
+    return i < 0 ? null : new URLSearchParams(st.slice(i + 1)).get(name);
+  }
   async function boot() {
     try {
       await K.start();
-      var attendId = new URLSearchParams(location.search).get('attend');
+      var attendId = urlParam('attend');
       if (attendId) {
         try {
           var a = await K.call('attend', { id: attendId });
@@ -35,7 +44,7 @@
         }
         return;
       }
-      var first = new URLSearchParams(location.search).get('view') === 'mine' ? 'mine' : 'service';
+      var first = urlParam('view') === 'mine' ? 'mine' : 'service';
       if (first === 'mine') S.from = 'service';
       var cached = readCache();
       if (cached) {
