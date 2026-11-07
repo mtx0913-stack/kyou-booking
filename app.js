@@ -202,13 +202,14 @@
           (date === S.date ? ' aria-pressed="true"' : '') + '><b>' + dd + '</b><i></i></button>';
       }
       var canPrev = S.month > thisMonth, canNext = S.month < K.shiftMonth(thisMonth, 2);
+      var emptyMonth = !!days && !Object.keys(days).some(function (k) { return k >= today && days[k].length; });
       var cal = '<div class="card cal"><div class="cal-head">' +
         '<button type="button" class="icon-btn" data-act="month" data-n="-1" aria-label="上個月"' + (canPrev ? '' : ' disabled') + '>' + K.ICON.prev + '</button>' +
         '<b>' + K.monthTitle(S.month) + '</b>' +
         '<button type="button" class="icon-btn" data-act="month" data-n="1" aria-label="下個月"' + (canNext ? '' : ' disabled') + '>' + K.ICON.next + '</button></div>' +
         '<div class="cal-week" aria-hidden="true">' + K.WD.map(function (w) { return '<div>' + w + '</div>'; }).join('') + '</div>' +
         '<div class="cal-grid">' + cells + '</div>' +
-        '<div class="legend"><span><i style="background:#A8805E"></i>有空檔</span><span><i style="background:#D9C7B0"></i>灰色＝已額滿或未開放</span></div></div>';
+        (emptyMonth ? '</div>' : '<div class="legend"><span><i style="background:#A8805E"></i>有空檔</span><span><i style="background:#D9C7B0"></i>灰色＝已額滿或未開放</span></div></div>');
 
       var timesHtml = '';
       if (S.date && days) {
@@ -219,8 +220,8 @@
                 return '<button type="button" class="time' + (S.time === t ? ' sel' : '') + '" data-act="time" data-time="' + t + '" aria-pressed="' + (S.time === t) + '">' + t + '</button>';
               }).join('') + '</div>'
             : '<div class="small muted">這天已經額滿，請選其他日期</div>') + '</div>';
-      } else if (days && !Object.keys(days).some(function (k) { return k >= today && days[k].length; })) {
-        timesHtml = '<div class="small muted">這個月目前沒有空檔，可以看看下個月</div>';
+      } else if (emptyMonth) {
+        timesHtml = '<div class="small muted">這個月目前沒有空檔' + (canNext ? '，可以看看下個月' : '') + '</div>';
       }
       var askLine = '<div class="ask">沒有喜歡的時段嗎？<button type="button" class="linkbtn" data-act="chat">私訊官方 LINE 詢問看看 ›</button></div>';
       if (timesHtml && !S.date) { askLine = '<div class="ask-group">' + timesHtml + askLine + '</div>'; timesHtml = ''; }
