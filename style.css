@@ -133,6 +133,7 @@ img { display: block; }
 .legend span { display: flex; align-items: center; gap: 6px; }
 .legend i { width: 6px; height: 6px; border-radius: 50%; }
 
+.ask-group { display: flex; flex-direction: column; gap: 2px; }
 .ask { display: flex; flex-wrap: wrap; align-items: center; gap: 0 4px; font-size: 13px; color: var(--muted); }
 .linkbtn { border: none; background: none; padding: 0; min-height: 44px; color: var(--brand); font-size: 13px; font-weight: 700; text-decoration: underline; text-underline-offset: 3px; }
 .tsel { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
