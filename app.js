@@ -223,6 +223,7 @@
         timesHtml = '<div class="small muted">這個月目前沒有空檔，可以看看下個月</div>';
       }
       var askLine = '<div class="ask">沒有喜歡的時段嗎？<button type="button" class="linkbtn" data-act="chat">私訊官方 LINE 詢問看看 ›</button></div>';
+      if (timesHtml && !S.date) { askLine = '<div class="ask-group">' + timesHtml + askLine + '</div>'; timesHtml = ''; }
       var chipText = s.name + addonList().map(function (a) { return '＋' + a.name; }).join('') + '・約 ' + hours(totalMinutes());
       return barBack('日子 kyou 預約', 'service') + '<main class="main">' + step(2, '選擇日期與時段') +
         '<div class="chip">' + esc(chipText) + '</div>' + cal + timesHtml + askLine + '</main>' +
