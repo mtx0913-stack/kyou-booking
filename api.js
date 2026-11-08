@@ -20,11 +20,26 @@
     return { demo: false };
   }
 
+  /** 只讀取資料的動作，失敗時可以安全地自動再試 */
+  var SAFE = { init: 1, availability: 1, 'admin.whoami': 1, 'admin.month': 1, 'admin.bookings': 1, 'admin.customers': 1 };
+
   async function call(action, data) {
     if (demo) {
       await new Promise(function (r) { setTimeout(r, 250); });
       return window.KyouMock(action, data || {});
     }
+    var tries = SAFE[action] ? 3 : 1;
+    for (var i = 1; ; i++) {
+      try { return await callOnce(action, data); }
+      catch (e) {
+        var retry = e.code === 'network' || e.code === 'bad_response';
+        if (!retry || i >= tries) throw e;
+        await new Promise(function (r) { setTimeout(r, 600 * i); });
+      }
+    }
+  }
+
+  async function callOnce(action, data) {
     var res;
     try {
       res = await fetch(C.API_URL, {
@@ -36,6 +51,8 @@
     }
     var j;
     try { j = await res.json(); } catch (e) { throw codeErr('network'); }
+    // 偶爾 Google 會把請求轉成 GET，拿到的不是這次動作的結果
+    if (j && j.name === 'kyou booking api') throw codeErr('bad_response');
     if (!j.ok) {
       if ((j.error === 'invalid_token' || j.error === 'not_logged_in') && !relogging && hasLiff()) {
         relogging = true;
@@ -131,9 +148,15 @@
     not_admin: '這個 LINE 帳號不是管理者',
     liff_missing: 'LINE 元件載入失敗，請重新開啟',
     not_yet: '預約時間還沒到，不能標記結果',
-    bad_status: '這筆預約的狀態已經變了，請重新整理'
+    bad_status: '這筆預約的狀態已經變了，請重新整理',
+    bad_response: '連線不穩，請重新整理確認結果'
   };
-  function errText(e) { return ERR[(e && e.code) || ''] || '發生錯誤，請稍後再試'; }
+  function errText(e) {
+    var code = (e && e.code) || '';
+    if (ERR[code]) return ERR[code];
+    var why = code || (e && e.name) || '';
+    return '發生錯誤，請稍後再試' + (why ? '（' + why + '）' : '');
+  }
 
   window.Kyou = {
     start: start, call: call, isDemo: function () { return demo; }, closeOrChat: closeOrChat,
