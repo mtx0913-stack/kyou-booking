@@ -58,7 +58,7 @@
         render();
       }
     } catch (e) {
-      if (S.data) { K.toast(K.errText(e)); return; }
+      if (S.data && S.shown && S.shown !== 'loading') { K.toast(K.errText(e)); return; }
       set({ screen: 'fatal', error: K.errText(e) });
     }
   }
@@ -68,7 +68,8 @@
     if (K.isDemo()) return null;
     try {
       var c = JSON.parse(localStorage.getItem(CACHE_KEY) || 'null');
-      return c && c.at > Date.now() - 7 * 86400000 ? c.d : null;
+      var d = c && c.at > Date.now() - 7 * 86400000 ? c.d : null;
+      return d && d.user && d.services ? d : null;
     } catch (e) { return null; }
   }
   function writeCache(d) {
@@ -83,6 +84,7 @@
   }
 
   function applyInit(d) {
+    if (!d || !d.user || !d.services) { var bad = new Error('bad_response'); bad.code = 'bad_response'; throw bad; }
     S.data = d;
     var c = d.customer;
     if (!S.phone && c) S.phone = c.phone || '';
@@ -349,6 +351,7 @@
   function render() {
     var fn = screens[S.screen] || screens.loading;
     root.innerHTML = fn();
+    S.shown = S.screen;
   }
 
   /* ---------- 互動 ---------- */
