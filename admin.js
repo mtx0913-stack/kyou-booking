@@ -348,6 +348,17 @@
       '<button type="button" class="btn btn-sm btn-danger" data-act="cxSubmit"' + (c.busy ? ' disabled' : '') + '>' + (c.busy ? '處理中…' : c.notify ? '確定取消並通知客人' : '確定取消') + '</button></div></div>';
   }
 
+  /** 手機上表格改成卡片，每格前面顯示欄位名稱 */
+  function labelTables(scope) {
+    scope.querySelectorAll('.card.table').forEach(function (t) {
+      var h = t.querySelector('.trow.h'); if (!h) return;
+      var ls = [].map.call(h.children, function (c) { return c.textContent.trim(); });
+      t.querySelectorAll('.trow:not(.h)').forEach(function (r) {
+        [].forEach.call(r.children, function (c, i) { c.setAttribute('data-l', ls[i] || ''); });
+      });
+    });
+  }
+
   function render() {
     if (A.screen === 'loading') return;
     if (A.screen === 'fatal') {
@@ -364,6 +375,7 @@
     var view = A.tab === 'slots' ? viewSlots() : A.tab === 'bookings' ? viewBookings() : viewCustomers();
     var active = document.activeElement && document.activeElement.id;
     root.innerHTML = nav() + '<main class="amain">' + view + '</main>' + (A.cx ? cancelDialog() : '');
+    labelTables(root);
     if (active === 'cq') { var el = document.getElementById('cq'); if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length); } }
   }
 
@@ -481,7 +493,7 @@
   });
   root.addEventListener('input', function (e) {
     if (e.target.id === 'cxReason' && A.cx) { A.cx.reason = e.target.value; return; }
-    if (e.target.id === 'cq') { A.q = e.target.value; var box = document.getElementById('custList'); if (box) box.innerHTML = custList(); }
+    if (e.target.id === 'cq') { A.q = e.target.value; var box = document.getElementById('custList'); if (box) { box.innerHTML = custList(); labelTables(box); } }
   });
 
   async function saveDays(close) {
