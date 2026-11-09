@@ -12,7 +12,8 @@
     sel: null, selTimes: [], extraMode: false, extras: [], sameWeekday: false, saving: false,
     bookings: null, autoHours: 24, sheetUrl: '', bTab: ST.pending,
     customers: null, cFilter: 'all', q: '',
-    months: {}, customH: '10', customM: '00', syncedAt: 0
+    months: {}, customH: '10', customM: '00', syncedAt: 0,
+    cx: null
   };
 
   /* ---------- 啟動 ---------- */
@@ -63,7 +64,7 @@
     if (refreshing || A.screen !== 'main' || A.saving) return;
     var ae = document.activeElement;
     if (ae && (ae.tagName === 'SELECT' || ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA')) return;
-    if (A.editNote) return;
+    if (A.editNote || A.cx) return;
     refreshing = true;
     try {
       await Promise.all([loadBookings(true), A.tab === 'slots' ? loadMonth(true) : null, A.tab === 'customers' ? loadCustomers() : null]);
@@ -239,6 +240,15 @@
     } else {
       var items2 = list.filter(function (b) { return b.status === A.bTab; })
         .sort(function (a, b) { return (b.date + b.start).localeCompare(a.date + a.start); });
+      if (A.bTab === ST.cancelled) {
+        body = items2.length ? '<div class="card table"><div class="trow h cxl-row"><div>時間</div><div>稱呼</div><div>項目</div><div>原因</div><div>取消類型</div></div>' +
+          items2.map(function (b) {
+            var tag = b.cancelBy === '店家調動' ? '<span class="badge badge-warn">店家調動</span>' : b.cancelBy === '客人要求' ? '<span class="badge badge-pending">客人要求</span>' : b.cancelBy ? '<span class="badge badge-done">' + esc(b.cancelBy) + '</span>' : '<span class="muted">—</span>';
+            return '<div class="trow cxl-row"><div class="bold">' + K.md(b.date) + ' ' + b.start + '</div><div>' + esc(b.nickname) + '</div><div>' + esc(b.serviceName) + '</div>' +
+              '<div class="small" style="line-height:1.5">' + (esc(b.cancelReason) || '<span class="muted">—</span>') + '</div><div>' + tag + (b.cancelNotified ? ' <span class="tiny muted">' + esc(b.cancelNotified) + '</span>' : '') + '</div></div>';
+          }).join('') + '</div>' : '<div class="card empty">沒有資料</div>';
+        return head + mark + body;
+      }
       body = items2.length ? '<div class="card table"><div class="trow h hist-row"><div>時間</div><div>稱呼</div><div>項目</div><div>電話</div><div>加購</div><div></div></div>' +
         items2.map(function (b) {
           var other = b.status === ST.completed ? ST.noshow : b.status === ST.noshow ? ST.completed : '';
@@ -317,6 +327,27 @@
       : '<button type="button" class="note add" data-act="noteEdit" data-uid="' + esc(c.uid) + '">＋ 備註</button>';
   }
 
+  var CX_REASONS = ['臨時有事', '身體不適', '設備維修', '天候因素', '客人臨時有事', '客人想改期'];
+  function cancelDialog() {
+    var c = A.cx, b = A.bookings.filter(function (x) { return x.id === c.id; })[0];
+    if (!b) return '';
+    var opt = function (v, t, s) {
+      return '<button type="button" class="cx-opt' + (c.by === v ? ' on' : '') + '" data-act="cxBy" data-by="' + v + '" aria-pressed="' + (c.by === v) + '"><span class="r"></span><span><b>' + t + '</b><small>' + s + '</small></span></button>';
+    };
+    return '<div class="cx-dim" data-act="cxClose"></div><div class="cx" role="dialog" aria-modal="true" aria-labelledby="cxTitle">' +
+      '<h3 id="cxTitle">取消這筆預約</h3>' +
+      '<div class="cx-who">' + esc(b.nickname) + '・' + K.md(b.date) + ' ' + b.start + '<br>' + esc(b.serviceName) + '</div>' +
+      '<div class="cx-label">取消原因是？<em>必選</em></div>' +
+      '<div class="cx-seg">' + opt('customer', '客人要求', '會算進客人的取消次數') + opt('shop', '店家調動', '不算客人的取消次數') + '</div>' +
+      '<div class="cx-label"><label for="cxReason">說明原因</label><em>必填，會顯示在客人的通知卡片上</em></div>' +
+      '<div class="cx-chips">' + CX_REASONS.map(function (r) { return '<button type="button" class="cx-chip' + (c.reason === r ? ' on' : '') + '" data-act="cxChip" data-t="' + r + '">' + r + '</button>'; }).join('') + '</div>' +
+      '<textarea id="cxReason" maxlength="200" placeholder="例如：美睫師臨時有事，需要取消這次預約">' + esc(c.reason) + '</textarea>' +
+      '<div class="tiny muted">點常用原因會自動帶入，也可以自己修改</div>' +
+      '<label class="cx-check"><input type="checkbox" id="cxNotify"' + (c.notify ? ' checked' : '') + '> 傳送取消通知給客人（LINE）</label>' +
+      '<div class="cx-btns"><button type="button" class="btn btn-sm btn-line" data-act="cxClose">先不要</button>' +
+      '<button type="button" class="btn btn-sm btn-danger" data-act="cxSubmit"' + (c.busy ? ' disabled' : '') + '>' + (c.busy ? '處理中…' : c.notify ? '確定取消並通知客人' : '確定取消') + '</button></div></div>';
+  }
+
   function render() {
     if (A.screen === 'loading') return;
     if (A.screen === 'fatal') {
@@ -332,7 +363,7 @@
     }
     var view = A.tab === 'slots' ? viewSlots() : A.tab === 'bookings' ? viewBookings() : viewCustomers();
     var active = document.activeElement && document.activeElement.id;
-    root.innerHTML = nav() + '<main class="amain">' + view + '</main>';
+    root.innerHTML = nav() + '<main class="amain">' + view + '</main>' + (A.cx ? cancelDialog() : '');
     if (active === 'cq') { var el = document.getElementById('cq'); if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length); } }
   }
 
@@ -389,9 +420,23 @@
     } else if (act === 'status') {
       await setStatus(el.getAttribute('data-id'), el.getAttribute('data-s'));
     } else if (act === 'cancel') {
-      var b = A.bookings.filter(function (x) { return x.id === el.getAttribute('data-id'); })[0];
-      if (!b || !confirm('取消 ' + b.nickname + ' ' + K.md(b.date) + ' ' + b.start + ' 的預約？時段會重新開放。')) return;
-      await setStatus(b.id, ST.cancelled);
+      A.cx = { id: el.getAttribute('data-id'), by: '', reason: '', notify: true, busy: false }; render();
+    } else if (act === 'cxBy') {
+      A.cx.by = el.getAttribute('data-by'); render();
+    } else if (act === 'cxChip') {
+      A.cx.reason = el.getAttribute('data-t'); render();
+      var ta2 = document.getElementById('cxReason'); if (ta2) { ta2.focus(); ta2.setSelectionRange(ta2.value.length, ta2.value.length); }
+    } else if (act === 'cxClose') {
+      if (A.cx && !A.cx.busy) { A.cx = null; render(); }
+    } else if (act === 'cxSubmit') {
+      var c = A.cx;
+      c.reason = ((document.getElementById('cxReason') || {}).value || c.reason).trim();
+      if (!c.by) { K.toast('請選擇是客人要求還是店家調動'); return; }
+      if (!c.reason) { K.toast('請填寫取消原因'); var ta3 = document.getElementById('cxReason'); if (ta3) ta3.focus(); return; }
+      c.busy = true; render();
+      var ok = await setStatus(c.id, ST.cancelled, { cancelBy: c.by, reason: c.reason, notify: c.notify });
+      if (ok) A.cx = null; else c.busy = false;
+      render();
     } else if (act === 'copy') {
       var bb = A.bookings.filter(function (x) { return x.id === el.getAttribute('data-id'); })[0];
       copy(copyText(bb), '已複製預約資訊');
@@ -428,12 +473,14 @@
   });
 
   root.addEventListener('change', function (e) {
+    if (e.target.id === 'cxNotify') { A.cx.notify = e.target.checked; A.cx.reason = (document.getElementById('cxReason') || {}).value || A.cx.reason; render(); return; }
     if (e.target.id === 'customH') { A.customH = e.target.value; return; }
     if (e.target.id === 'customM') { A.customM = e.target.value; return; }
     if (e.target.id === 'sameWd') { A.sameWeekday = e.target.checked; render(); }
     if (e.target.id === 'extraMode') { A.extraMode = e.target.checked; if (!A.extraMode) A.extras = []; render(); }
   });
   root.addEventListener('input', function (e) {
+    if (e.target.id === 'cxReason' && A.cx) { A.cx.reason = e.target.value; return; }
     if (e.target.id === 'cq') { A.q = e.target.value; var box = document.getElementById('custList'); if (box) box.innerHTML = custList(); }
   });
 
@@ -460,20 +507,26 @@
     A.saving = false; render();
   }
 
-  async function setStatus(id, s) {
+  async function setStatus(id, s, extra) {
     var b = (A.bookings || []).filter(function (x) { return x.id === id; })[0];
     var prev = b && b.status;
-    if (b) { b.status = s; render(); }
+    if (b && !extra) { b.status = s; render(); }
     try {
-      var r = await K.call('admin.setStatus', { id: id, status: s });
-      if (s === ST.confirmed && r.pushed) K.toast('已確認，並傳了「預約成功」通知給客人');
+      var r = await K.call('admin.setStatus', Object.assign({ id: id, status: s }, extra || {}));
+      if (b && extra) { b.status = s; b.cancelBy = extra.cancelBy === 'shop' ? '店家調動' : '客人要求'; b.cancelReason = extra.reason; b.cancelNotified = extra.notify ? (r.pushed ? '已通知' : '通知失敗') : '未通知'; }
+      if (s === ST.cancelled && extra && extra.notify && r.pushed) K.toast('已取消，並傳了取消通知給客人');
+      else if (s === ST.cancelled && extra && extra.notify) K.toast('已取消，但通知沒傳出去，請到 LINE 告知客人');
+      else if (s === ST.cancelled) K.toast('已取消，時段已重新開放');
+      else if (s === ST.confirmed && r.pushed) K.toast('已確認，並傳了「預約成功」通知給客人');
       else if (s === ST.confirmed && r.canPush) K.toast('已確認，但通知沒傳出去（客人可能還沒加好友），請到 LINE 回覆她');
       else K.toast('已改成「' + s + '」');
       loadBookings(true);
       if (A.monthData) loadMonth(true);
+      return true;
     } catch (err) {
       if (b) { b.status = prev; render(); }
       K.toast(K.errText(err));
+      return false;
     }
   }
 
