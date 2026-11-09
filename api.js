@@ -149,7 +149,9 @@
     liff_missing: 'LINE 元件載入失敗，請重新開啟',
     not_yet: '預約時間還沒到，不能標記結果',
     bad_status: '這筆預約的狀態已經變了，請重新整理',
-    bad_response: '連線不穩，請重新整理確認結果'
+    bad_response: '連線不穩，請重新整理確認結果',
+    need_reason: '請填寫取消原因',
+    need_cancel_by: '請選擇是客人要求還是店家調動'
   };
   function errText(e) {
     var code = (e && e.code) || '';
