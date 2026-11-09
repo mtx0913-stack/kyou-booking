@@ -14,7 +14,7 @@
     services: [
       { id: 'upper', name: '上睫毛＋增黑', price: 799, minutes: 120, note: '上睫毛管理及深層保養', priceText: '$799' },
       { id: 'lower', name: '下睫毛＋增黑', price: 499, minutes: 60, note: '下睫毛管理及深層保養', priceText: '$499' },
-      { id: 'both', name: '上＋下睫毛', price: 1298, minutes: 180, note: '上下一起做', priceText: '$799＋$499' }
+      { id: 'both', name: '上＋下睫毛', price: 1200, minutes: 180, note: '上下一起做', priceText: '$1,200' }
     ],
     addons: [
       { id: 'remove', name: '嫁接卸除', price: 400, minutes: 10, note: '卸除原本的嫁接睫毛' }
@@ -158,13 +158,18 @@
       }
       case 'admin.setStatus': {
         var x = db.bookings.filter(function (b) { return b.id === d.id; })[0];
+        if (d.status === '已取消') {
+          if (!d.cancelBy) err('need_cancel_by');
+          if (!String(d.reason || '').trim()) err('need_reason');
+          x.cancelBy = d.cancelBy === 'shop' ? '店家調動' : '客人要求'; x.cancelReason = d.reason; x.cancelNotified = d.notify ? '已通知' : '未通知';
+        }
         x.status = d.status;
-        return { ok: true };
+        return { ok: true, pushed: !!d.notify, canPush: true };
       }
       case 'admin.customers': {
         return { ok: true, customers: clone(db.customers.map(function (c) {
           var st = stats(c.uid);
-          var cc = db.bookings.filter(function (b) { return b.uid === c.uid && b.status === '已取消'; }).length;
+          var cc = db.bookings.filter(function (b) { return b.uid === c.uid && b.status === '已取消' && b.cancelBy !== '店家調動'; }).length;
           return Object.assign({}, c, { note: c.note || '', cancelCount: cc, completedCount: st.completed, streak: st.streak, lastDate: st.lastDate, needsPrompt: !c.blocked && st.streak >= 2 && st.streak > c.dismissed });
         }).sort(function (a, b) { return b.lastDate.localeCompare(a.lastDate); })) };
       }
